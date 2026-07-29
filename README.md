@@ -19,7 +19,9 @@ Drawing and simulating 10k nodes each break the naive approach, in a different w
    draw all 10k as `gl.POINTS` in a **single `drawArrays` call**; edges are a
    `gl.LINES` `drawElements` over a *static* index buffer (topology never
    re-uploads). Pan/zoom is a uniform in the vertex shader. The DOM is never
-   touched.
+   touched. Edges render **opaque, with blending off** — alpha-blending 40k
+   lines was GPU-bound at ~16fps on this integrated GPU; dropping the
+   per-fragment blend/overdraw restored **60+fps for the full scene**.
 
 2. **Simulation.** Repulsion is an n-body problem: all-pairs is O(n²) =
    10⁴ × 10⁴ = **100 million force calculations per tick** → seconds per frame.
@@ -33,8 +35,12 @@ Drawing and simulating 10k nodes each break the naive approach, in a different w
 
 ```
 Barnes-Hut vs naive all-pairs @ 10k:  > 8x faster, scales sub-quadratically
-Barnes-Hut approximation accuracy:    mean cosine 0.9+, mean rel. error < 0.35
+Barnes-Hut accuracy @ theta=1.0:      mean cosine > 0.97, mean rel err < 0.06, p95 < 0.30
 ```
+
+(The accuracy test validates the algorithm at the standard opening angle
+θ ≤ 1.0. The *app* runs θ=2.0 — see the trade in "Decisions" — which is livelier
+but coarser per-body; the layout still forms cleanly, but it isn't "exact".)
 
 **Live** (`npm run dev`) — the on-screen counters, shown in the GIF above:
 
@@ -122,10 +128,31 @@ traversal); naive is a flat ~1.5s regardless. In the browser the settled
 - **Positions stream as full copies** (~80 KB/tick) from the worker. Fine at this
   scale; a bigger graph would use a `SharedArrayBuffer` (needs COOP/COEP headers).
 - **No node labels** — unreadable at 10k anyway; and no level-of-detail culling.
-- **`preserveDrawingBuffer: true`** is enabled so the demo GIF can be captured;
-  a shipped build would turn it off.
 - **The GIF recorder + `/__save` endpoint are dev-only** (the endpoint is Vite
-  middleware that doesn't exist in a production build).
+  middleware that doesn't exist in a production build; the recorder renders and
+  captures each frame synchronously, so it needs no `preserveDrawingBuffer`).
+- **Edges toggle exists** because they're an overlay, not the point — the "10k
+  nodes at 60fps" claim is about the nodes; opaque edges keep the full scene
+  above 60 too, but the toggle lets you compare.
+- **θ=2.0 in the app trades per-body accuracy for a livelier sim.** At θ=2 a
+  minority of nodes near dense clusters get materially over-estimated forces; the
+  aggregate layout is fine but it's not an accurate n-body solve (θ≤1.0 is).
+- **Exactly-coincident nodes would feel a small self-repulsion** (a multi-body
+  leaf doesn't exclude the query body). The graph generator jitters positions so
+  this never occurs in-app; a caller feeding identical coordinates would see
+  forces diverge from exact by one self-term.
+
+## Correctness review
+
+Before shipping, the sim and the render/worker architecture went through a lean
+adversarial review (one reader each). It caught real ones, now fixed: the render
+FPS counter advanced even when nothing drew (fake 60 on a blank/stalled canvas —
+now only counts frames that actually render); a dragged node was re-clamped
+before the tick but the integrator moved it after, so it jittered off the cursor
+(now clamped on both sides); and the accuracy test was mean-only with a
+razor-thin margin (now validated at θ=1.0 with a p95 worst-case bound). Silent
+worker-init failures now surface via an error handler. The θ=2.0 accuracy trade
+and coincident-point edge case are documented above.
 
 ## Run it
 
