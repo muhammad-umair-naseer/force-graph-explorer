@@ -85,7 +85,9 @@ export class GraphRenderer {
   private viewportH = 1;
 
   constructor(canvas: HTMLCanvasElement, n: number, colors: Float32Array, edgeIndices: Uint32Array) {
-    const gl = canvas.getContext("webgl2", { antialias: true, alpha: false });
+    // preserveDrawingBuffer lets the canvas be captured (for the demo GIF) at
+    // any time; negligible cost for this workload.
+    const gl = canvas.getContext("webgl2", { antialias: true, alpha: false, preserveDrawingBuffer: true });
     if (!gl) throw new Error("WebGL2 not available");
     this.gl = gl;
     this.n = n;

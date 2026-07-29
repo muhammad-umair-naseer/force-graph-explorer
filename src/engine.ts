@@ -48,6 +48,80 @@ export class Engine {
     this.worker.onmessage = this.onWorkerMessage;
     this.attach();
     this.raf = requestAnimationFrame(this.loop);
+    (window as unknown as { __engine: Engine }).__engine = this; // dev handle (GIF capture)
+  }
+
+  private rec: {
+    total: number;
+    done: number;
+    delayMs: number;
+    gif: ReturnType<typeof import("gifenc").GIFEncoder>;
+    quantize: typeof import("gifenc").quantize;
+    applyPalette: typeof import("gifenc").applyPalette;
+    ctx: CanvasRenderingContext2D;
+    w: number;
+    h: number;
+    baseScale: number;
+    resolve: (msg: string) => void;
+  } | null = null;
+
+  /**
+   * Dev-only: record a short demo GIF. Driven by WORKER frames (one GIF frame
+   * per sim tick), so motion is tied to the simulation and is unaffected by the
+   * pane being hidden (which would throttle timers/rAF). Encodes with gifenc and
+   * POSTs to the /__save dev endpoint → docs/demo.gif.
+   */
+  async recordDemo(frames = 40): Promise<string> {
+    const { GIFEncoder, quantize, applyPalette } = await import("gifenc");
+    const w = 640;
+    const h = 460;
+    const off = document.createElement("canvas");
+    off.width = w;
+    off.height = h;
+    this.worker.postMessage({ type: "reheat" });
+    return new Promise<string>((resolve) => {
+      this.rec = {
+        total: frames,
+        done: 0,
+        delayMs: 70,
+        gif: GIFEncoder(),
+        quantize,
+        applyPalette,
+        ctx: off.getContext("2d")!,
+        w,
+        h,
+        baseScale: this.initialScale,
+        resolve,
+      };
+    });
+  }
+
+  private captureFrame(): void {
+    const r = this.rec!;
+    const p = r.done / (r.total - 1);
+    // Zoom in through the middle, gentle pan — shows detail + navigation.
+    this.cam.scale = r.baseScale * (1 + 0.7 * Math.sin(p * Math.PI));
+    this.cam.x = 700 * Math.sin(p * Math.PI * 2);
+    this.cam.y = 220 * Math.sin(p * Math.PI);
+    if (this.renderer && this.latestPos) {
+      this.renderer.render(this.latestPos, this.cam, this.pointSize());
+    }
+    r.ctx.drawImage(this.canvas, 0, 0, r.w, r.h);
+    const { data } = r.ctx.getImageData(0, 0, r.w, r.h);
+    const palette = r.quantize(data, 64);
+    const index = r.applyPalette(data, palette);
+    r.gif.writeFrame(index, r.w, r.h, { palette, delay: r.delayMs });
+    r.done++;
+    if (r.done >= r.total) {
+      r.gif.finish();
+      this.cam = { x: 0, y: 0, scale: r.baseScale };
+      const bytes = r.gif.bytes();
+      const resolve = r.resolve;
+      this.rec = null;
+      fetch("/__save", { method: "POST", body: new Blob([bytes as BlobPart]) }).then(() =>
+        resolve(`saved ${bytes.length} bytes`),
+      );
+    }
   }
 
   private onWorkerMessage = (ev: MessageEvent): void => {
@@ -67,6 +141,7 @@ export class Engine {
       this.simTickMs = d.tickMs;
       this.mode = d.mode;
       this.alpha = d.alpha;
+      if (this.rec) this.captureFrame(); // one GIF frame per sim tick
     }
   };
 
