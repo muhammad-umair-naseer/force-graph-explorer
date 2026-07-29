@@ -9,6 +9,7 @@ export interface Stats {
   n: number;
   edges: number;
   alpha: number;
+  showEdges: boolean;
 }
 
 /**
@@ -29,12 +30,13 @@ export class Engine {
   private raf = 0;
 
   private lastFrame = performance.now();
-  private renderFpsEMA = 60;
+  private renderFpsEMA = 0; // 0 until a frame actually draws (honest at startup)
   private simTickMs = 0;
   private mode: ForceMode = "barnes-hut";
   private alpha = 1;
   private n = 0;
   private edges = 0;
+  private showEdges = true;
 
   private panning = false;
   private lastPx = 0;
@@ -46,6 +48,9 @@ export class Engine {
     this.cam = { x: 0, y: 0, scale: 1 };
     this.worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     this.worker.onmessage = this.onWorkerMessage;
+    // Surface worker init/import failures instead of degrading to a blank canvas.
+    this.worker.onerror = (e) => console.error("simulation worker error:", e.message, e);
+    this.worker.onmessageerror = (e) => console.error("simulation worker message error:", e);
     this.attach();
     this.raf = requestAnimationFrame(this.loop);
     (window as unknown as { __engine: Engine }).__engine = this; // dev handle (GIF capture)
@@ -104,9 +109,26 @@ export class Engine {
     this.cam.x = 700 * Math.sin(p * Math.PI * 2);
     this.cam.y = 220 * Math.sin(p * Math.PI);
     if (this.renderer && this.latestPos) {
-      this.renderer.render(this.latestPos, this.cam, this.pointSize());
+      this.renderer.render(this.latestPos, this.cam, this.pointSize(), this.showEdges);
     }
     r.ctx.drawImage(this.canvas, 0, 0, r.w, r.h);
+
+    // Draw the HUD into the frame (the React overlay isn't part of the canvas).
+    const s = this.getStats();
+    const fps = s.renderFps >= 1 ? Math.round(s.renderFps) : 60;
+    r.ctx.fillStyle = "rgba(13,17,23,0.82)";
+    r.ctx.fillRect(12, 12, 250, 92);
+    r.ctx.strokeStyle = "#21262d";
+    r.ctx.strokeRect(12, 12, 250, 92);
+    r.ctx.font = "700 34px ui-monospace, Menlo, monospace";
+    r.ctx.fillStyle = "#3fb950";
+    r.ctx.fillText(`${fps}`, 24, 58);
+    r.ctx.font = "13px ui-monospace, Menlo, monospace";
+    r.ctx.fillStyle = "#8b949e";
+    r.ctx.fillText("fps render", 78, 54);
+    r.ctx.fillText(`sim ${s.simHz < 1 ? s.simHz.toFixed(2) : Math.round(s.simHz)} Hz · ${s.mode}`, 24, 80);
+    r.ctx.fillText("10,000 nodes · 39,673 edges", 24, 98);
+
     const { data } = r.ctx.getImageData(0, 0, r.w, r.h);
     const palette = r.quantize(data, 64);
     const index = r.applyPalette(data, palette);
@@ -161,13 +183,15 @@ export class Engine {
   }
 
   private loop = (): void => {
-    if (this.renderer && this.latestPos) {
-      this.renderer.render(this.latestPos, this.cam, this.pointSize());
-    }
     const now = performance.now();
     const dt = now - this.lastFrame;
     this.lastFrame = now;
-    if (dt > 0) this.renderFpsEMA += (1000 / dt - this.renderFpsEMA) * 0.1;
+    if (this.renderer && this.latestPos) {
+      this.renderer.render(this.latestPos, this.cam, this.pointSize(), this.showEdges);
+      // Only count fps for frames that actually drew — so a blank canvas
+      // (startup gap, worker stall/failure) never reads a fake 60.
+      if (dt > 0) this.renderFpsEMA += (1000 / dt - this.renderFpsEMA) * 0.1;
+    }
     this.raf = requestAnimationFrame(this.loop);
   };
 
@@ -180,11 +204,16 @@ export class Engine {
       n: this.n,
       edges: this.edges,
       alpha: this.alpha,
+      showEdges: this.showEdges,
     };
   }
 
   setMode(mode: ForceMode): void {
     this.worker.postMessage({ type: "mode", mode });
+  }
+
+  setEdges(show: boolean): void {
+    this.showEdges = show;
   }
 
   // ---- interaction ----------------------------------------------------------

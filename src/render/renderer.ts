@@ -46,7 +46,9 @@ precision mediump float;
 in vec3 v_color;
 out vec4 outColor;
 void main() {
-  outColor = vec4(v_color * 0.6, 0.10);
+  // Opaque dim line: alpha blending 40k lines is GPU-bound on integrated
+  // graphics, so edges draw with blending OFF (see renderer.render).
+  outColor = vec4(v_color * 0.22, 1.0);
 }`;
 
 function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
@@ -85,9 +87,7 @@ export class GraphRenderer {
   private viewportH = 1;
 
   constructor(canvas: HTMLCanvasElement, n: number, colors: Float32Array, edgeIndices: Uint32Array) {
-    // preserveDrawingBuffer lets the canvas be captured (for the demo GIF) at
-    // any time; negligible cost for this workload.
-    const gl = canvas.getContext("webgl2", { antialias: true, alpha: false, preserveDrawingBuffer: true });
+    const gl = canvas.getContext("webgl2", { antialias: true, alpha: false });
     if (!gl) throw new Error("WebGL2 not available");
     this.gl = gl;
     this.n = n;
@@ -144,7 +144,7 @@ export class GraphRenderer {
   }
 
   /** pos = interleaved [x0,y0,x1,y1,...]; drawn under the given camera. */
-  render(pos: Float32Array, cam: Camera, pointSize: number): void {
+  render(pos: Float32Array, cam: Camera, pointSize: number, showEdges = true): void {
     const gl = this.gl;
     gl.clearColor(0.039, 0.055, 0.078, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -160,12 +160,17 @@ export class GraphRenderer {
       gl.uniform1f(gl.getUniformLocation(prog, "u_pointSize"), ptSize);
     };
 
-    // Edges first (behind nodes).
-    setUniforms(this.edgeProg, 1);
-    gl.bindVertexArray(this.edgeVAO);
-    gl.drawElements(gl.LINES, this.edgeCount * 2, gl.UNSIGNED_INT, 0);
+    // Edges first (behind nodes), OPAQUE (blend off) — alpha-blending 40k lines
+    // is the GPU bottleneck on integrated graphics.
+    if (showEdges) {
+      gl.disable(gl.BLEND);
+      setUniforms(this.edgeProg, 1);
+      gl.bindVertexArray(this.edgeVAO);
+      gl.drawElements(gl.LINES, this.edgeCount * 2, gl.UNSIGNED_INT, 0);
+      gl.enable(gl.BLEND);
+    }
 
-    // Nodes.
+    // Nodes (blended, for the soft circular rim).
     setUniforms(this.pointProg, pointSize);
     gl.bindVertexArray(this.pointVAO);
     gl.drawArrays(gl.POINTS, 0, this.n);

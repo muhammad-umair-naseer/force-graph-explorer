@@ -70,6 +70,16 @@ function step(): void {
   sim.tick();
   const tickMs = performance.now() - t0;
 
+  // Re-clamp AFTER the tick too: tick() integrates every node (including the
+  // pinned one), so without this the dragged node drifts one step off the cursor
+  // and jitters. Pinning both sides keeps it exactly under the pointer.
+  if (pinNode >= 0) {
+    graph.x[pinNode] = pinX;
+    graph.y[pinNode] = pinY;
+    graph.vx[pinNode] = 0;
+    graph.vy[pinNode] = 0;
+  }
+
   const { x, y } = graph;
   for (let i = 0; i < N; i++) {
     scratch[i * 2] = x[i]!;

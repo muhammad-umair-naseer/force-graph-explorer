@@ -18,6 +18,7 @@ export function App() {
   }, []);
 
   const setMode = (mode: ForceMode) => engineRef.current?.setMode(mode);
+  const toggleEdges = () => engineRef.current?.setEdges(!(stats?.showEdges ?? true));
 
   const renderFps = stats?.renderFps ?? 0;
   const fpsColor = renderFps >= 55 ? "#3fb950" : renderFps >= 30 ? "#d29922" : "#f85149";
@@ -59,6 +60,17 @@ export function App() {
           <button style={{ ...btn, ...(mode === "naive" ? btnActiveRed : {}) }} onClick={() => setMode("naive")}>
             Naive O(n²)
           </button>
+        </div>
+        <div style={{ marginTop: 6 }}>
+          <button
+            style={{ ...btn, ...(stats?.showEdges ? btnActive : {}) }}
+            onClick={toggleEdges}
+          >
+            edges: {stats?.showEdges ? "on" : "off"}
+          </button>
+          <span style={{ fontSize: 10, color: "#586069", marginLeft: 6 }}>
+            (opaque — alpha-blended would be GPU-bound)
+          </span>
         </div>
 
         {mode === "naive" ? (
