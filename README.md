@@ -1,8 +1,7 @@
 # force-graph-explorer
 
 A force-directed graph of **10,000 nodes**, laid out with a live physics
-simulation and rendered in WebGL at **60fps**. Day 5 of a 30-day build
-challenge — a visual vertical slice.
+simulation and rendered in WebGL at **60fps**. Part of my [Advanced Build Series](https://github.com/muhammad-umair-naseer/advanced-build-series) — a visual vertical slice.
 
 React + Vite + TypeScript · raw WebGL2 · Vitest.
 
